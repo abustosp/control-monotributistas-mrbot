@@ -89,7 +89,8 @@ def consulta_mis_comprobantes(
 
 def descargar_archivo(
     url: str,
-    nombre_archivo: None | str = None
+    nombre_archivo: None | str = None,
+    directorio_objetivo: str | None = None
     ) -> None:
     """
     Descarga un recurso binario via URL conservando el nombre sugerido por el servidor cuando sea posible.
@@ -120,6 +121,10 @@ def descargar_archivo(
 
     # Si se pasó un nombre explícito, respetarlo; si no, usar el sugerido
     save_as = nombre_archivo if nombre_archivo else filename
+    
+    if directorio_objetivo:
+        os.makedirs(directorio_objetivo, exist_ok=True)
+        save_as = os.path.join(directorio_objetivo, save_as)
 
     with open(save_as, "wb") as file:
         for chunk in response.iter_content(chunk_size=8192):
@@ -153,7 +158,45 @@ def extraer_url_minio(response: Dict[str, Any], tipo: str) -> Optional[str]:
     return None
 
 
-def main() -> None:
+def extraccion_urls_minio(response: Dict[str, Any]):
+    """
+    Extrae las URLs de descarga alojadas en MinIO para emitidos y recibidos.
+    y devuelve los resultados para su posterior descarga.
+
+    Args:
+        response (Dict[str, Any]): JSON retornado por `consulta_mis_comprobantes`.
+
+    """
+    
+    minio_mce = None
+    minio_mcr = None
+
+    if isinstance(response, dict):
+        # Preferir claves directas del ejemplo JSON
+        minio_mce = response.get('mis_comprobantes_emitidos_url_minio') or None
+        minio_mcr = response.get('mis_comprobantes_recibidos_url_minio') or None
+
+        # Si no están, intentar el formato con 'descargas_minio' con listas
+        if not minio_mce:
+            try:
+                minio_mce = response.get('descargas_minio', {}).get('emitidos', [])[0].get('url_descarga')
+            except Exception:
+                minio_mce = None
+        if not minio_mcr:
+            try:
+                minio_mcr = response.get('descargas_minio', {}).get('recibidos', [])[0].get('url_descarga')
+            except Exception:
+                minio_mcr = None
+
+    if not minio_mce:
+        print("No se encontró URL para emitidos en la respuesta")
+    if not minio_mcr:
+        print("No se encontró URL para recibidos en la respuesta")
+
+    return {"emitidos": minio_mce, "recibidos": minio_mcr}
+
+
+def test_caller_mc() -> None:
     load_dotenv()
 
     mrbot_user = os.getenv("MRBOT_USER")
@@ -182,92 +225,14 @@ def main() -> None:
         contrasena=contrasena,
     )
 
-    mce_url = extraer_url_minio(response, "emitidos")
-    mcr_url = extraer_url_minio(response, "recibidos")
+    urls = extraccion_urls_minio(response)
 
-    if mce_url:
-        descargar_archivo(mce_url)
-    else:
-        print("Saltando descarga de emitidos porque no hay URL.")
+    for tipo, enlace in urls.items():
+        if not enlace:
+            print(f"Saltando descarga de {tipo} porque no hay URL.")
+            continue
 
-    if mcr_url:
-        descargar_archivo(mcr_url)
-    else:
-        print("Saltando descarga de recibidos porque no hay URL.")
-
-
+        descargar_archivo(enlace, directorio_objetivo="descargas_mis_comprobantes")
+    
 if __name__ == "__main__":
-    main()
-
-load_dotenv()
-
-
-MRBOT_USER = os.getenv("MRBOT_USER")
-MRBOT_API_KEY = os.getenv("MRBOT_API_KEY")
-
-BASE_URL = os.getenv("BASE_URL")
-
-MIS_COMPROBANTES_ENDPOINT = os.getenv("MIS_COMPROBANTES_ENDPOINT")
-RCEL_ENDPOINT = os.getenv("RCEL_ENDPOINT")
-
-MC_DESDE_EJEMPLO = os.getenv("MC_DESDE_EJEMPLO")
-MC_HASTA_EJEMPLO = os.getenv("MC_HASTA_EJEMPLO")
-RCEL_DESDE_EJEMPLO = os.getenv("RCEL_DESDE_EJEMPLO")
-RCEL_HASTA_EJEMPLO = os.getenv("RCEL_HASTA_EJEMPLO")
-RCEL_DENOMINACION_EJEMPLO = os.getenv("RCEL_DENOMINACION_EJEMPLO")
-DENOMIACION_EJEMPLO = os.getenv("DENOMIACION_EJEMPLO")
-CUIT_REPRESENTANTE_EJEMPLO = os.getenv("CUIT_REPRESENTANTE_EJEMPLO")
-CLAVE_REPRESENTANTE_EJEMPLO = os.getenv("CLAVE_REPRESENTANTE_EJEMPLO")
-CUIT_REPRESENTADO_EJEMPLO = os.getenv("CUIT_REPRESENTADO_EJEMPLO")
-
-
-response = consulta_mis_comprobantes(
-    mrbot_user=MRBOT_USER,
-    mrbot_api_key=MRBOT_API_KEY,
-    base_url=BASE_URL,
-    mis_comprobantes_endpoint=MIS_COMPROBANTES_ENDPOINT,
-    desde=MC_DESDE_EJEMPLO,
-    hasta=MC_HASTA_EJEMPLO,
-    cuit_inicio_sesion=CUIT_REPRESENTADO_EJEMPLO,
-    representado_nombre=DENOMIACION_EJEMPLO,
-    representado_cuit=CUIT_REPRESENTANTE_EJEMPLO,
-    contrasena=CLAVE_REPRESENTANTE_EJEMPLO,
-    )
-
-# Extraer URL de los comprimidos desde la respuesta (soporta ambos formatos)
-ejemplo_minio_mce = None
-ejemplo_minio_mcr = None
-
-if isinstance(response, dict):
-    # Preferir claves directas del ejemplo JSON
-    ejemplo_minio_mce = response.get('mis_comprobantes_emitidos_url_minio') or None
-    ejemplo_minio_mcr = response.get('mis_comprobantes_recibidos_url_minio') or None
-
-    # Si no están, intentar el formato con 'descargas_minio' con listas
-    if not ejemplo_minio_mce:
-        try:
-            ejemplo_minio_mce = response.get('descargas_minio', {}).get('emitidos', [])[0].get('url_descarga')
-        except Exception:
-            ejemplo_minio_mce = None
-    if not ejemplo_minio_mcr:
-        try:
-            ejemplo_minio_mcr = response.get('descargas_minio', {}).get('recibidos', [])[0].get('url_descarga')
-        except Exception:
-            ejemplo_minio_mcr = None
-
-if not ejemplo_minio_mce:
-    print("No se encontró URL para emitidos en la respuesta")
-if not ejemplo_minio_mcr:
-    print("No se encontró URL para recibidos en la respuesta")
-
-
-# Llamadas condicionales para descargar ejemplos
-if ejemplo_minio_mce:
-    descargar_archivo(ejemplo_minio_mce)
-else:
-    print("Saltando descarga de emitidos porque no hay URL.")
-
-if ejemplo_minio_mcr:
-    descargar_archivo(ejemplo_minio_mcr)
-else:
-    print("Saltando descarga de recibidos porque no hay URL.")
+    test_caller_mc()
