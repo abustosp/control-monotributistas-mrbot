@@ -1,4 +1,5 @@
 import tkinter as tk
+from tkinter.messagebox import showinfo
 from lib.caller_mc import consulta_mis_comprobantes
 from lib.caller_rcel import consulta_rcel, validar_respuesta_rcel
 from lib.utils import descargar_archivo, extraccion_urls_minio, extraer_zip, guardar_json
@@ -6,6 +7,7 @@ from dotenv import load_dotenv
 import os
 import pandas as pd
 from datetime import date, datetime
+import numpy as np
 
 load_dotenv()
 
@@ -201,13 +203,247 @@ def procesar_descarga_rcel(row, mrbot_user, mrbot_api_key, base_url, rcel_endpoi
 
     except Exception as e:
         print(f"\n✗ Error procesando RCEL {denominacion_rcel} (CUIT: {cuit_representado}): {e}")
+        
+
+def control(
+    archivos_mc: str ,
+    archivos_PDF: str,
+    archivos_PDF_JSON: str
+    ):
+    '''
+    Controla los datos de los archivos de 'Mis Comprobantes' con las escalas de categorías de AFIP
+
+
+    '''
+    # Mostrar mensaje de inicio
+    #showinfo("Control de datos", "Se iniciará el control de los datos de los archivos de 'Mis Comprobantes' con las escalas de categorías de AFIP y los PDF de las facturas")
+
+    # Leer Excel con las tablas de las escalas
+    categorias = pd.read_excel('Categorias.xlsx')
+
+    # Leer la celda 'A2' de la hoja 'Rango de Fechas' y guardarla en la variable 'fecha_inicial' en formato datetime
+    fecha_inicial = pd.read_excel('Categorias.xlsx', sheet_name='Rango de Fechas', header=None, skiprows=1, usecols=[0]).iloc[0,0]
+    fecha_inicial = pd.to_datetime(fecha_inicial , format='%d/%m/%Y')
+    # leer la celda 'B2' en fomato fecha
+    fecha_final = pd.read_excel('Categorias.xlsx', sheet_name='Rango de Fechas', header=None, skiprows=1, usecols=[1]).iloc[0,0]
+    fecha_final = pd.to_datetime(fecha_final , format='%d/%m/%Y')
+
+    # Crear un DataFrame vacio para guardar los datos consolidados
+    consolidado = pd.DataFrame()
+    Info_Facturas_PDF = pd.DataFrame()
+
+    # Leer cada uno de los archivos de 'Mis Comprobantes' y concat en el DataFrame Consolidado
+    # Consolidar archivos y renombrar columnas
+    # consolidadar columnas
+    for f in archivos_mc:
+        #Si el existe el archivo, leerlo
+        if os.path.isfile(f):  
+            data = pd.read_csv(f, sep=';', decimal=',', encoding='utf-8-sig' )
+            # si el datsaframe esta vacio, no hacer nada
+            if len(data) > 0:
+                # Crear la columna 'Archivo' con el ultimo elemento de 'f' separado por "/"
+                data['Archivo'] = f.split("/")[-1]
+                
+                # Extraer información del nombre del archivo
+                # Formato: NumArchivo - Tipo - FechaDesde - FechaHasta - CUIT - Denominacion.csv
+                partes_archivo = data["Archivo"].str.split("-")
+                data['Fin CUIT'] = partes_archivo.str[4].str.strip().astype(np.int64)  # CUIT del contribuyente
+                data['CUIT Cliente'] = partes_archivo.str[4].str.strip().astype(np.int64)  # Mismo CUIT
+                data['Cliente'] = partes_archivo.str[5].str.strip().str.replace('.csv','', regex=True)
+                
+                # Detectar si es MCE (emitidos) o MCR (recibidos) por las columnas
+                es_emitido = 'Denominación Receptor' in data.columns
+                es_recibido = 'Denominación Emisor' in data.columns
+                
+                # Unificar las columnas según el tipo
+                if es_emitido:
+                    # Para emitidos: Receptor es el cliente
+                    data['Nro. Doc. Receptor/Emisor'] = data['Nro. Doc. Receptor']
+                    data['Denominación Receptor/Emisor'] = data['Denominación Receptor']
+                elif es_recibido:
+                    # Para recibidos: Emisor es el proveedor
+                    data['Nro. Doc. Receptor/Emisor'] = data['Nro. Doc. Emisor']
+                    data['Denominación Receptor/Emisor'] = data['Denominación Emisor']
+                
+                # Seleccionar solo las columnas necesarias para el consolidado
+                columnas_necesarias = [
+                    'Fecha de Emisión', 'Tipo de Comprobante', 'Punto de Venta', 
+                    'Número Desde', 'Número Hasta', 'Cód. Autorización',
+                    'Tipo Cambio', 'Moneda', 
+                    'Imp. Neto Gravado Total', 'Imp. Neto No Gravado', 
+                    'Imp. Op. Exentas', 'Otros Tributos', 'Total IVA', 'Imp. Total',
+                    'Nro. Doc. Receptor/Emisor', 'Denominación Receptor/Emisor',
+                    'Archivo', 'CUIT Cliente', 'Fin CUIT', 'Cliente'
+                ]
+                data = data[columnas_necesarias]
+                consolidado = pd.concat([consolidado , data], ignore_index=True)
+            
+    # Renombrar columnas
+    consolidado.columns = [ 'Fecha' , 'Tipo' , 'Punto de Venta' , 'Número Desde' , 'Número Hasta' , 'Cód. Autorización' , 'Tipo Cambio' , 'Moneda' , 'Imp. Neto Gravado' , 'Imp. Neto No Gravado' , 'Imp. Op. Exentas' , 'Otros Tributos' , 'IVA' , 'Imp. Total' , 'Nro. Doc. Receptor/Emisor' , 'Denominación Receptor/Emisor' , 'Archivo' , 'CUIT Cliente' , 'Fin CUIT' , 'Cliente']
+
+    #Eliminar las columas 'Imp. Neto Gravado' , 'Imp. Neto No Gravado' , 'Imp. Op. Exentas' , 'IVA'
+    consolidado.drop(['Imp. Neto Gravado' , 'Imp. Neto No Gravado' , 'Imp. Op. Exentas' , 'IVA'], axis=1, inplace=True)
+
+    #Cambiar de signo si es una Nota de Crédito (Tipo es numérico, no string)
+    # Nota: El tipo 11 es factura C, tipo 13 es nota de crédito C, etc.
+    # consolidado.loc[consolidado["Tipo"].str.contains("Nota de Crédito"), ['Imp. Total']] *= -1
+
+    #Crear columna de 'MC' con los valores 'archivo' que van desde el caracter 5 al 8 en la Consolidado
+    consolidado['MC'] = consolidado['Archivo'].str.split("-").str[1].str.strip()
+
+    # Leer archivos JSON de RCEL
+    for factura in archivos_PDF_JSON:
+        #Si el existe el archivo, leerlo
+        if os.path.isfile(factura):
+            import json
+            try:
+                with open(factura, 'r', encoding='utf-8-sig') as f:
+                    data_dict = json.load(f)
+                    
+                # Convertir a DataFrame (una sola fila)
+                data_pdf = pd.DataFrame([data_dict])
+                
+                # si el datsaframe esta vacio, no hacer nada
+                if len(data_pdf) > 0:
+                    # Crear la columna 'Archivo PDF' con el ultimo elemento de 'factura' separado por "/"
+                    data_pdf['Archivo PDF'] = factura.split("/")[-1]
+                    
+                    # Extraer información del nombre del archivo
+                    # Formato: CUIT-COD-PtoVenta-NumFactura.json
+                    partes = data_pdf["Archivo PDF"].str.split("-")
+                    data_pdf['CUIT Cliente'] = partes.str[0].str.strip().astype(np.int64)
+                    data_pdf['Fin CUIT'] = partes.str[0].str.strip().astype(np.int64)
+                    
+                    # Extraer Cliente del directorio padre
+                    directorio_padre = factura.split("/")[-2]  # Ej: "20147130202_BUSTOS JOSE MARTIN"
+                    cliente = directorio_padre.split("_", 1)[1] if "_" in directorio_padre else directorio_padre
+                    data_pdf['Cliente'] = cliente
+                    
+                    Info_Facturas_PDF = pd.concat([Info_Facturas_PDF , data_pdf], ignore_index=True)
+            except Exception as e:
+                print(f"Error leyendo {factura}: {e}")
+                continue
+
+    # Construir AUX en consolidado para cruzar con los JSON de RCEL
+    # Formato del JSON: CUIT_Emisor-COD(3)-PtoVenta(5)-Numero(8)
+    # En MC: Fin CUIT es el CUIT del emisor (contribuyente)
+    consolidado['AUX'] = (
+        consolidado['Fin CUIT'].astype(int).astype(str) + "-" +
+        consolidado['Tipo'].astype(int).astype(str).str.zfill(3) + "-" + 
+        consolidado['Punto de Venta'].astype(int).astype(str).str.zfill(5) + "-" + 
+        consolidado['Número Desde'].astype(int).astype(str).str.zfill(8)
+    )
+
+    # Merge con la tabla Info_Facturas_PDF 
+    consolidado = pd.merge(consolidado , 
+                           Info_Facturas_PDF[['AUX' , 'Desde' , 'Hasta' , 'Archivo PDF']] , 
+                           how='left' , 
+                           left_on='AUX' , 
+                           right_on='AUX')
+
+    # Crear la columna 'Cruzado' con valores 'Si' o 'No' dependiendo si se cruzó o no la información
+    consolidado['Cruzado'] = ''
+    consolidado.loc[consolidado['Archivo PDF'].notnull() , 'Cruzado'] = 'Si'
+    consolidado.loc[consolidado['Archivo PDF'].isnull() , 'Cruzado'] = 'No'
+
+    # Si las columnas 'Desde' y 'Hasta' son NaN entonces Eliminar todas filas donde la columna 'Fecha' no se encuentre entre el rango de fechas iniciales y finales
+    ##########Consolidado = Consolidado[(Consolidado['Fecha'] >= fecha_inicial) & (Consolidado['Fecha'] <= fecha_final) & (Consolidado['Desde'].isnull()) & (Consolidado['Hasta'].isnull())]
+
+    # Convertir la columna 'Fecha' a datetime primero
+    # La Fecha del CSV viene en formato ISO (yyyy-mm-dd)
+    consolidado['Fecha'] = pd.to_datetime(consolidado['Fecha'], format='ISO8601')
+    
+    # Convertir las columnas 'Desde' y 'Hasta' del JSON a datetime
+    # Vienen en formato dd/mm/yyyy
+    consolidado['Desde'] = pd.to_datetime(consolidado['Desde'], format='%d/%m/%Y', errors='coerce')
+    consolidado['Hasta'] = pd.to_datetime(consolidado['Hasta'], format='%d/%m/%Y', errors='coerce')
+    
+    # Si las columnas 'Desde' y 'Hasta' son vacíos entonces toman el valor de 'Fecha'
+    consolidado['Desde'] = consolidado['Desde'].fillna(consolidado['Fecha'])
+    consolidado['Hasta'] = consolidado['Hasta'].fillna(consolidado['Fecha'])
+
+    # Crear columna auxiliar en Consolidado con el máximo entre la variable fecha_inicial y la columna 'FECHA EMISION'
+    consolidado['Fecha Inicial'] = fecha_inicial
+    consolidado['Fecha_Inicial_max'] = consolidado[['Fecha Inicial' , 'Desde']].max(axis=1)
+    del consolidado['Fecha Inicial']
+
+    # Crear columna auxiliar en Consolidado con el mínimo entre la variable fecha_final y la columna 'HASTA'
+    consolidado['Fecha Final'] = fecha_final
+    consolidado['Fecha_Final_min'] = consolidado[['Fecha Final' , 'Hasta']].min(axis=1)
+    del consolidado['Fecha Final']
+
+    # Calcular los dias de diferencia entre 'FECHA EMISION' y 'HASTA'
+    consolidado['Dias de facturación'] = consolidado['Hasta'] - consolidado['Desde'] 
+    consolidado['Dias de facturación'] = consolidado['Dias de facturación'].dt.days +1
+
+    # Crear una columa 'Días Efectivos' como la diferencia entre la columna 'Fecha_Final_min' y la columna 'Fecha_Inicial_max'
+    consolidado['Días Efectivos'] = consolidado['Fecha_Final_min'] - consolidado['Fecha_Inicial_max']
+    consolidado['Días Efectivos'] = consolidado['Días Efectivos'].dt.days +1
+
+    # si los 'Días Efectivos' son menores a 0, entonces se reemplaza por 0
+    consolidado.loc[consolidado['Días Efectivos'] < 0, 'Días Efectivos'] = 0
+
+    # Crear una columna 'Importe por día' con el valor de la columna 'Imp. Total' dividido entre el valor de la columna 'Dias de facturación'
+    consolidado['Importe por día'] = consolidado['Imp. Total'] / consolidado['Dias de facturación']
+
+    # Multiplicar el valor de la columna 'Importe por día' por el valor de la columna 'Días Efectivos' y guardar el resultado en la columna 'Importe Prorrateado'
+    consolidado['Importe Prorrateado'] = consolidado['Importe por día'] * consolidado['Días Efectivos']
+
+    # Volver a mostrar las columnas 'Desde', 'Hasta' y 'Fecha' en formato fecha
+    consolidado['Desde'] = consolidado['Desde'].dt.strftime('%d/%m/%Y')
+    consolidado['Hasta'] = consolidado['Hasta'].dt.strftime('%d/%m/%Y')
+    consolidado['Fecha'] = consolidado['Fecha'].dt.strftime('%d/%m/%Y')
+    consolidado['Fecha_Inicial_max'] = consolidado['Fecha_Inicial_max'].dt.strftime('%d/%m/%Y')
+    consolidado['Fecha_Final_min'] = consolidado['Fecha_Final_min'].dt.strftime('%d/%m/%Y')
+
+    No_Cruzado = 0
+
+    if 'No' in consolidado['Cruzado'].values:
+        No_Cruzado = consolidado['Cruzado'].value_counts()['No']
+
+
+    #Crear Tabla dinámica con los totales de las columnas  'Importe Prorrateado' por 'Archivo'
+    TablaDinamica = pd.pivot_table(consolidado, values=['Importe Prorrateado' , 'Tipo'], index=['Cliente' , 'MC'], aggfunc={'Importe Prorrateado': 'sum' , 'Tipo': 'count'})
+
+
+    # Renombrar la columna 'Tipo' por 'Cantidad de Comprobantes' de la TablaDinamica1 , TablaDinamica2 y TablaDinamica3
+    TablaDinamica.rename(columns={'Tipo': 'Cantidad de Comprobantes'}, inplace=True)
+
+    # Buscar el valor de 'Importe Prorrateado' en la escala de categorias donde el valor esta en 'Ingresos brutos'
+    TablaDinamica['Ingresos brutos máximos por la categoría'] = TablaDinamica['Importe Prorrateado'].apply(lambda x: categorias.loc[categorias['Ingresos brutos'] >= x, 'Ingresos brutos'].iloc[0])
+
+    #Buscar la 'Categoría' en la escala de categorias donde el valor esta en 'Ingresos brutos máximos por la categoría'
+    TablaDinamica['Categoría'] = TablaDinamica['Importe Prorrateado'].apply(lambda x: categorias.loc[categorias['Ingresos brutos'] >= x, 'Categoria'].iloc[0])
+
+    # Exportar el Consolidado y la Tabla Dinámica a un archivo de Excel
+    Archivo_final = pd.ExcelWriter('Reporte Recategorizaciones de Monotributistas.xlsx', engine='openpyxl')
+    TablaDinamica.to_excel(Archivo_final, sheet_name='Tabla Dinámica', index=True)
+    consolidado.to_excel(Archivo_final, sheet_name='Consolidado', index=False)
+    Archivo_final.close()
+
+    #Guardar el archivo
+    #Archivo_final.save()
+
+    #Mostrar mensaje de finalización
+    #showinfo(title="Finalizado", message=f"El archivo se ha generado correctamente.\n \nCantidad de Facturas no cruzados: {No_Cruzado}")
+
 
 
 if __name__ == "__main__":
+    import glob
+    
+    print("\n" + "="*80)
+    print("INICIANDO PROCESO DE DESCARGA Y CONTROL DE MONOTRIBUTISTAS")
+    print("="*80 + "\n")
+    start = datetime.now()
+    print(f"Inicio del proceso: {start.strftime('%Y-%m-%d %H:%M:%S')}")
+    print("\n" + "="*80)
+    
     archivo_base = "planilla-control-monotributistas.xlsx"
     df = pd.read_excel(archivo_base)
 
-    print(df.head())
+    # Mostrar el encabezado sin la columna sensible 'Clave_representante'
+    print(df.head().drop(columns=['Clave_representante'], errors='ignore'))
 
     mrbot_user = os.getenv("MRBOT_USER")
     mrbot_api_key = os.getenv("MRBOT_API_KEY")
@@ -224,4 +460,35 @@ if __name__ == "__main__":
         
         # Procesar RCEL
         procesar_descarga_rcel(row, mrbot_user, mrbot_api_key, base_url, rcel_endpoint, downloads_rcel_path)
+    
+    # Ejecutar control con los archivos descargados
+    print("\n" + "="*80)
+    print("INICIANDO CONTROL DE ARCHIVOS DESCARGADOS")
+    print("="*80 + "\n")
+    
+    # Buscar archivos de Mis Comprobantes y RCEL
+    archivos_mc = glob.glob(f"{downloads_mc_path}/**/extraido/*.csv", recursive=True)
+    archivos_PDF = []  # No se usan archivos PDF directamente
+    archivos_PDF_JSON = glob.glob(f"{downloads_rcel_path}/**/*.json", recursive=True)
+    
+    print(f"Archivos MC encontrados: {len(archivos_mc)}")
+    print(f"Archivos JSON RCEL encontrados: {len(archivos_PDF_JSON)}")
+    
+    if archivos_mc or archivos_PDF_JSON:
+        print("\nEjecutando función control...\n")
+        control(archivos_mc, archivos_PDF, archivos_PDF_JSON)
+        print("\n" + "="*80)
+        print("CONTROL COMPLETADO")
+        print("="*80)
+        print("\nReporte generado: 'Reporte Recategorizaciones de Monotributistas.xlsx'")
+    else:
+        print("\nNo se encontraron archivos para procesar.")
+        
+    print("\n" + "="*80)
+    print("PROCESO COMPLETADO")
+    print("="*80 + "\n")
+    end = datetime.now()
+    print(f"Fin del proceso: {end.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Duración total: {end - start}")
+    print("\n" + "="*80 + "\n")
         
