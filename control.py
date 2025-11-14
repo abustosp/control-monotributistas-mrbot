@@ -3,11 +3,13 @@ from tkinter.messagebox import showinfo
 from lib.caller_mc import consulta_mis_comprobantes
 from lib.caller_rcel import consulta_rcel, validar_respuesta_rcel
 from lib.utils import descargar_archivo, extraccion_urls_minio, extraer_zip, guardar_json
+from lib.formatos import Aplicar_formato_encabezado, Aplicar_formato_moneda, Autoajustar_columnas, Agregar_filtros, Alinear_columnas
 from dotenv import load_dotenv
 import os
 import pandas as pd
 from datetime import date, datetime
 import numpy as np
+from openpyxl import load_workbook
 
 load_dotenv()
 
@@ -416,13 +418,35 @@ def control(
     TablaDinamica['Categoría'] = TablaDinamica['Importe Prorrateado'].apply(lambda x: categorias.loc[categorias['Ingresos brutos'] >= x, 'Categoria'].iloc[0])
 
     # Exportar el Consolidado y la Tabla Dinámica a un archivo de Excel
-    Archivo_final = pd.ExcelWriter('Reporte Recategorizaciones de Monotributistas.xlsx', engine='openpyxl')
+    nombre_archivo = 'Reporte Recategorizaciones de Monotributistas.xlsx'
+    Archivo_final = pd.ExcelWriter(nombre_archivo, engine='openpyxl')
     TablaDinamica.to_excel(Archivo_final, sheet_name='Tabla Dinámica', index=True)
     consolidado.to_excel(Archivo_final, sheet_name='Consolidado', index=False)
     Archivo_final.close()
 
-    #Guardar el archivo
-    #Archivo_final.save()
+    # Aplicar formatos del archivo
+    wb = load_workbook(nombre_archivo)
+    
+    # Formatear hoja 'Tabla Dinámica'
+    ws_tabla = wb['Tabla Dinámica']
+    Aplicar_formato_encabezado(ws_tabla)
+    Aplicar_formato_moneda(ws_tabla, 3, 3)
+    Aplicar_formato_moneda(ws_tabla, 5, 5)
+    Autoajustar_columnas(ws_tabla)
+    Agregar_filtros(ws_tabla)
+    
+    # Formatear hoja 'Consolidado'
+    ws_consolidado = wb['Consolidado']
+    Aplicar_formato_encabezado(ws_consolidado)
+    Aplicar_formato_moneda(ws_consolidado, 7, 10)
+    Aplicar_formato_moneda(ws_consolidado, 27, 28)
+    Alinear_columnas(ws_consolidado, 1, ws_consolidado.max_column, 'left')
+    Autoajustar_columnas(ws_consolidado)
+    Agregar_filtros(ws_consolidado)
+    
+    # Guardar el archivo con formato
+    wb.save(nombre_archivo)
+    wb.close()
 
     #Mostrar mensaje de finalización
     #showinfo(title="Finalizado", message=f"El archivo se ha generado correctamente.\n \nCantidad de Facturas no cruzados: {No_Cruzado}")
