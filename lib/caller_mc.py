@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from lib.utils import descargar_archivo, extraccion_urls_minio
+from lib.utils import descargar_archivo, descargar_archivos_concurrente, extraccion_urls_minio
 
 def consulta_mis_comprobantes(
     mrbot_user: str,
@@ -123,12 +123,15 @@ def test_caller_mc() -> None:
 
     urls = extraccion_urls_minio(response)
 
+    descargas = []
     for tipo, enlace in urls.items():
         if not enlace:
             print(f"Saltando descarga de {tipo} porque no hay URL.")
             continue
-
-        descargar_archivo(enlace, directorio_objetivo="descargas_mis_comprobantes")
+        descargas.append((enlace, None, "descargas_mis_comprobantes"))
+    
+    if descargas:
+        descargar_archivos_concurrente(descargas)
     
 if __name__ == "__main__":
     test_caller_mc()

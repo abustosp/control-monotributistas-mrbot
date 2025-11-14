@@ -2,10 +2,12 @@ import json
 import os
 import re
 import shutil
-from typing import Any, Dict, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Dict, List, Optional, Tuple
 from zipfile import ZipFile
 
 import requests
+from dotenv import load_dotenv
 
 
 def descargar_archivo(
@@ -53,6 +55,45 @@ def descargar_archivo(
 
     print(f"Archivo guardado como: {save_as}")
     return save_as
+
+
+def descargar_archivos_concurrente(
+    urls: List[Tuple[str, Optional[str], Optional[str]]],
+    max_workers: Optional[int] = None
+) -> List[str]:
+    """
+    Descarga múltiples archivos de forma concurrente usando ThreadPoolExecutor.
+
+    Args:
+        urls (List[Tuple[str, Optional[str], Optional[str]]]): Lista de tuplas con 
+            (url, nombre_archivo, directorio_objetivo) para cada descarga.
+        max_workers (Optional[int]): Número máximo de workers concurrentes. 
+            Si es None, se obtiene de la variable de entorno MAX_WORKERS (default: 10).
+
+    Returns:
+        List[str]: Lista de rutas de archivos descargados exitosamente.
+    """
+    if max_workers is None:
+        load_dotenv()
+        max_workers = int(os.getenv("MAX_WORKERS", "10"))
+
+    rutas_descargadas = []
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(descargar_archivo, url, nombre, directorio): (url, nombre, directorio)
+            for url, nombre, directorio in urls
+        }
+        
+        for future in as_completed(futures):
+            url, nombre, directorio = futures[future]
+            try:
+                ruta = future.result()
+                rutas_descargadas.append(ruta)
+            except Exception as exc:
+                print(f"Error descargando {url}: {exc}")
+    
+    return rutas_descargadas
 
 
 def extraer_url_minio(response: Dict[str, Any], tipo: str) -> Optional[str]:

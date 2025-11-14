@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from lib.utils import descargar_archivo, guardar_json
+from lib.utils import descargar_archivo, descargar_archivos_concurrente, guardar_json
 
 
 def consulta_rcel(
@@ -179,13 +179,25 @@ def main() -> None:
 
     directorio_objetivo = f"descargas_rcel/{representado_cuit}"
 
+    descargas = []
+    facturas_con_metadata = {}
+    
     for factura in facturas:
         url_pdf = factura.get("URL_MINIO")
         if url_pdf:
-            ruta_pdf = descargar_archivo(url_pdf, directorio_objetivo=directorio_objetivo)
-            guardar_json(factura, ruta_pdf)
+            descargas.append((url_pdf, None, directorio_objetivo))
+            facturas_con_metadata[url_pdf] = factura
         else:
             print(f"Factura sin URL_MINIO: {factura.get('NUMERO_FACTURA', 'N/A')}")
+    
+    if descargas:
+        rutas_descargadas = descargar_archivos_concurrente(descargas)
+        
+        for ruta in rutas_descargadas:
+            for url, metadata in facturas_con_metadata.items():
+                if url in ruta or os.path.basename(ruta) in url:
+                    guardar_json(metadata, ruta)
+                    break
 
 
 if __name__ == "__main__":
