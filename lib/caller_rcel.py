@@ -77,13 +77,17 @@ def descargar_archivo(
     url: str,
     nombre_archivo: None | str = None,
     directorio_objetivo: str | None = None
-    ) -> None:
+    ) -> str:
     """
     Descarga un recurso binario via URL conservando el nombre sugerido por el servidor cuando sea posible.
 
     Args:
         url (str): URL desde donde se descarga el archivo.
         nombre_archivo (Optional[str]): nombre local en el que guardar el archivo.
+        directorio_objetivo (Optional[str]): directorio donde guardar el archivo.
+
+    Returns:
+        str: Ruta completa del archivo descargado.
     """
     # Descargar en streaming y determinar nombre sugerido por el servidor (Content-Disposition)
     response = requests.get(url, stream=True)
@@ -118,6 +122,7 @@ def descargar_archivo(
                 file.write(chunk)
 
     print(f"Archivo guardado como: {save_as}")
+    return save_as
 
 
 def validar_respuesta_rcel(response: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -185,6 +190,26 @@ def iter_urls_facturas(facturas: Iterable[Dict[str, Any]]) -> Iterable[str]:
             yield url
 
 
+def guardar_json_factura(
+    factura: Dict[str, Any],
+    ruta_pdf: str
+) -> None:
+    """
+    Guarda el diccionario de una factura como archivo JSON.
+
+    Args:
+        factura (Dict[str, Any]): Diccionario con los datos de la factura.
+        ruta_pdf (str): Ruta del archivo PDF descargado.
+    """
+    # Cambiar extensión de .pdf a .json
+    ruta_json = os.path.splitext(ruta_pdf)[0] + ".json"
+    
+    with open(ruta_json, "w", encoding="utf-8") as file:
+        json.dump(factura, file, indent=2, ensure_ascii=False)
+    
+    print(f"JSON guardado como: {ruta_json}")
+
+
 def main() -> None:
     load_dotenv()
 
@@ -220,13 +245,22 @@ def main() -> None:
         print(str(exc))
         return
 
-    urls = list(iter_urls_facturas(facturas))
-    if not urls:
-        print("La consulta RCEL no devolvió URLs de facturas.")
+    if not facturas:
+        print("La consulta RCEL no devolvió facturas.")
         return
 
-    for url in urls:
-        descargar_archivo(url, directorio_objetivo=f"descargas_rcel/{representado_cuit}")
+    directorio_objetivo = f"descargas_rcel/{representado_cuit}"
+
+    # Procesar cada factura: descargar PDF y guardar JSON
+    for factura in facturas:
+        url_pdf = factura.get("URL_MINIO")
+        if url_pdf:
+            # Descargar PDF
+            ruta_pdf = descargar_archivo(url_pdf, directorio_objetivo=directorio_objetivo)
+            # Guardar JSON con los datos de la factura
+            guardar_json_factura(factura, ruta_pdf)
+        else:
+            print(f"Factura sin URL_MINIO: {factura.get('NUMERO_FACTURA', 'N/A')}")
 
 
 if __name__ == "__main__":
