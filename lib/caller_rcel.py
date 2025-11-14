@@ -75,7 +75,8 @@ def consulta_rcel(
 
 def descargar_archivo(
     url: str,
-    nombre_archivo: None | str = None
+    nombre_archivo: None | str = None,
+    directorio_objetivo: str | None = None
     ) -> None:
     """
     Descarga un recurso binario via URL conservando el nombre sugerido por el servidor cuando sea posible.
@@ -106,6 +107,10 @@ def descargar_archivo(
 
     # Si se pasó un nombre explícito, respetarlo; si no, usar el sugerido
     save_as = nombre_archivo if nombre_archivo else filename
+    
+    if directorio_objetivo:
+        os.makedirs(directorio_objetivo, exist_ok=True)
+        save_as = os.path.join(directorio_objetivo, save_as)
 
     with open(save_as, "wb") as file:
         for chunk in response.iter_content(chunk_size=8192):
@@ -221,7 +226,7 @@ def main() -> None:
         return
 
     for url in urls:
-        descargar_archivo(url)
+        descargar_archivo(url, directorio_objetivo=f"descargas_rcel/{representado_cuit}")
 
 
 if __name__ == "__main__":
