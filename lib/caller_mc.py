@@ -1,11 +1,16 @@
 import json
 import os
-import re
-from typing import Any, Dict, Optional
+import sys
+from pathlib import Path
+from typing import Any, Dict
 
 import requests
 from dotenv import load_dotenv
-from requests.models import Response
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from lib.utils import descargar_archivo, extraccion_urls_minio
 
 def consulta_mis_comprobantes(
     mrbot_user: str,
@@ -85,115 +90,6 @@ def consulta_mis_comprobantes(
 
     print(response.text)
     return response.json()
-
-
-def descargar_archivo(
-    url: str,
-    nombre_archivo: None | str = None,
-    directorio_objetivo: str | None = None
-    ) -> None:
-    """
-    Descarga un recurso binario via URL conservando el nombre sugerido por el servidor cuando sea posible.
-
-    Args:
-        url (str): URL desde donde se descarga el archivo.
-        nombre_archivo (Optional[str]): nombre local en el que guardar el archivo.
-    """
-    # Descargar en streaming y determinar nombre sugerido por el servidor (Content-Disposition)
-    response = requests.get(url, stream=True)
-    response.raise_for_status()
-
-    # Intentar obtener filename desde Content-Disposition
-    filename = None
-    cd = response.headers.get('content-disposition')
-
-    # soporta: filename="name.ext"  y filename*=UTF-8''name.ext
-    if cd:
-        m = re.search(r"filename\*?=(?:UTF-8''|\"?)([^\";]+)\"?", cd, flags=re.IGNORECASE)
-        if m:
-            filename = m.group(1)
-
-    # Si no hay header o no se pudo extraer, extraer desde la URL (y decodificar)
-    if not filename:
-        from urllib.parse import unquote, urlparse
-        path = urlparse(url).path
-        filename = unquote(path.rsplit('/', 1)[-1]) or 'downloaded_file'
-
-    # Si se pasó un nombre explícito, respetarlo; si no, usar el sugerido
-    save_as = nombre_archivo if nombre_archivo else filename
-    
-    if directorio_objetivo:
-        os.makedirs(directorio_objetivo, exist_ok=True)
-        save_as = os.path.join(directorio_objetivo, save_as)
-
-    with open(save_as, "wb") as file:
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                file.write(chunk)
-
-    print(f"Archivo guardado como: {save_as}")
-
-
-def extraer_url_minio(response: Dict[str, Any], tipo: str) -> Optional[str]:
-    """
-    Extrae la URL de descarga alojada en MinIO para un tipo de comprobante.
-
-    Args:
-        response (Dict[str, Any]): JSON retornado por `consulta_mis_comprobantes`.
-        tipo (str): `emitidos` o `recibidos`.
-
-    Returns:
-        Optional[str]: URL de descarga si está presente, de lo contrario `None`.
-    """
-
-    clave_directa = f"mis_comprobantes_{tipo}_url_minio"
-    url = response.get(clave_directa)
-    if url:
-        return url
-
-    nodo = response.get("descargas_minio", {}).get(tipo, [])
-    if nodo:
-        return nodo[0].get("url_descarga")
-
-    return None
-
-
-def extraccion_urls_minio(response: Dict[str, Any]):
-    """
-    Extrae las URLs de descarga alojadas en MinIO para emitidos y recibidos.
-    y devuelve los resultados para su posterior descarga.
-
-    Args:
-        response (Dict[str, Any]): JSON retornado por `consulta_mis_comprobantes`.
-
-    """
-    
-    minio_mce = None
-    minio_mcr = None
-
-    if isinstance(response, dict):
-        # Preferir claves directas del ejemplo JSON
-        minio_mce = response.get('mis_comprobantes_emitidos_url_minio') or None
-        minio_mcr = response.get('mis_comprobantes_recibidos_url_minio') or None
-
-        # Si no están, intentar el formato con 'descargas_minio' con listas
-        if not minio_mce:
-            try:
-                minio_mce = response.get('descargas_minio', {}).get('emitidos', [])[0].get('url_descarga')
-            except Exception:
-                minio_mce = None
-        if not minio_mcr:
-            try:
-                minio_mcr = response.get('descargas_minio', {}).get('recibidos', [])[0].get('url_descarga')
-            except Exception:
-                minio_mcr = None
-
-    if not minio_mce:
-        print("No se encontró URL para emitidos en la respuesta")
-    if not minio_mcr:
-        print("No se encontró URL para recibidos en la respuesta")
-
-    return {"emitidos": minio_mce, "recibidos": minio_mcr}
 
 
 def test_caller_mc() -> None:

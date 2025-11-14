@@ -1,10 +1,16 @@
 import json
 import os
-import re
+import sys
+from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 import requests
 from dotenv import load_dotenv
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from lib.utils import descargar_archivo, guardar_json
 
 
 def consulta_rcel(
@@ -73,58 +79,6 @@ def consulta_rcel(
     return parsed
 
 
-def descargar_archivo(
-    url: str,
-    nombre_archivo: None | str = None,
-    directorio_objetivo: str | None = None
-    ) -> str:
-    """
-    Descarga un recurso binario via URL conservando el nombre sugerido por el servidor cuando sea posible.
-
-    Args:
-        url (str): URL desde donde se descarga el archivo.
-        nombre_archivo (Optional[str]): nombre local en el que guardar el archivo.
-        directorio_objetivo (Optional[str]): directorio donde guardar el archivo.
-
-    Returns:
-        str: Ruta completa del archivo descargado.
-    """
-    # Descargar en streaming y determinar nombre sugerido por el servidor (Content-Disposition)
-    response = requests.get(url, stream=True)
-    response.raise_for_status()
-
-    # Intentar obtener filename desde Content-Disposition
-    filename = None
-    cd = response.headers.get('content-disposition')
-
-    # soporta: filename="name.ext"  y filename*=UTF-8''name.ext
-    if cd:
-        m = re.search(r"filename\*?=(?:UTF-8''|\"?)([^\";]+)\"?", cd, flags=re.IGNORECASE)
-        if m:
-            filename = m.group(1)
-
-    # Si no hay header o no se pudo extraer, extraer desde la URL (y decodificar)
-    if not filename:
-        from urllib.parse import unquote, urlparse
-        path = urlparse(url).path
-        filename = unquote(path.rsplit('/', 1)[-1]) or 'downloaded_file'
-
-    # Si se pasó un nombre explícito, respetarlo; si no, usar el sugerido
-    save_as = nombre_archivo if nombre_archivo else filename
-    
-    if directorio_objetivo:
-        os.makedirs(directorio_objetivo, exist_ok=True)
-        save_as = os.path.join(directorio_objetivo, save_as)
-
-    with open(save_as, "wb") as file:
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                file.write(chunk)
-
-    print(f"Archivo guardado como: {save_as}")
-    return save_as
-
-
 def validar_respuesta_rcel(response: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Asegura que la respuesta indica éxito y retorna el listado de facturas emitidas.
@@ -132,9 +86,7 @@ def validar_respuesta_rcel(response: Dict[str, Any]) -> List[Dict[str, Any]]:
     Si la API devuelve éxito falso, levanta un RuntimeError con los mensajes de error recibidos.
     """
 
-    # Caso éxito
     if response.get("success"):
-        # Ajustá esta clave si tu API la nombra distinto
         return response.get("facturas_emitidas", [])
 
     detail = response.get("detail")
@@ -142,7 +94,6 @@ def validar_respuesta_rcel(response: Dict[str, Any]) -> List[Dict[str, Any]]:
     mensajes: List[str] = []
     error_code = None
 
-    # detail como dict {"message": "...", "error_code": "...", ...}
     if isinstance(detail, dict):
         posibles_claves_msg = ("message", "msg", "detail")
         for clave in posibles_claves_msg:
@@ -154,7 +105,6 @@ def validar_respuesta_rcel(response: Dict[str, Any]) -> List[Dict[str, Any]]:
 
         error_code = detail.get("error_code") or detail.get("type")
 
-    # detail como lista de dicts (típico error de validación de FastAPI/Pydantic)
     elif isinstance(detail, list):
         for item in detail:
             if not isinstance(item, dict):
@@ -165,11 +115,9 @@ def validar_respuesta_rcel(response: Dict[str, Any]) -> List[Dict[str, Any]]:
             if not error_code:
                 error_code = item.get("error_code") or item.get("type")
 
-    # detail como string plano
     elif isinstance(detail, str):
         mensajes.append(detail)
 
-    # Fallback: tomar mensaje de nivel raíz si no se juntó nada
     if not mensajes:
         top_msg = response.get("message") or response.get("detail")
         if isinstance(top_msg, str):
@@ -188,26 +136,6 @@ def iter_urls_facturas(facturas: Iterable[Dict[str, Any]]) -> Iterable[str]:
         url = factura.get("URL_MINIO")
         if url:
             yield url
-
-
-def guardar_json_factura(
-    factura: Dict[str, Any],
-    ruta_pdf: str
-) -> None:
-    """
-    Guarda el diccionario de una factura como archivo JSON.
-
-    Args:
-        factura (Dict[str, Any]): Diccionario con los datos de la factura.
-        ruta_pdf (str): Ruta del archivo PDF descargado.
-    """
-    # Cambiar extensión de .pdf a .json
-    ruta_json = os.path.splitext(ruta_pdf)[0] + ".json"
-    
-    with open(ruta_json, "w", encoding="utf-8") as file:
-        json.dump(factura, file, indent=2, ensure_ascii=False)
-    
-    print(f"JSON guardado como: {ruta_json}")
 
 
 def main() -> None:
@@ -251,14 +179,11 @@ def main() -> None:
 
     directorio_objetivo = f"descargas_rcel/{representado_cuit}"
 
-    # Procesar cada factura: descargar PDF y guardar JSON
     for factura in facturas:
         url_pdf = factura.get("URL_MINIO")
         if url_pdf:
-            # Descargar PDF
             ruta_pdf = descargar_archivo(url_pdf, directorio_objetivo=directorio_objetivo)
-            # Guardar JSON con los datos de la factura
-            guardar_json_factura(factura, ruta_pdf)
+            guardar_json(factura, ruta_pdf)
         else:
             print(f"Factura sin URL_MINIO: {factura.get('NUMERO_FACTURA', 'N/A')}")
 
