@@ -3,3 +3,8 @@ venv
 *pycache*
 *.zip
 *.pdf
+*.pdf
+*.json
+*.csv
+*.xlsx
+
