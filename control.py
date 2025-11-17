@@ -2,28 +2,20 @@ import tkinter as tk
 from tkinter.messagebox import showinfo
 from lib.caller_mc import consulta_mis_comprobantes
 from lib.caller_rcel import consulta_rcel, validar_respuesta_rcel
-from lib.utils import descargar_archivo, extraccion_urls_minio, extraer_zip, guardar_json
+from lib.utils import descargar_archivo, descargar_archivos_concurrente, extraccion_urls_minio, extraer_zip, guardar_json
 from lib.formatos import Aplicar_formato_encabezado, Aplicar_formato_moneda, Autoajustar_columnas, Agregar_filtros, Alinear_columnas
+from lib.helpers import formatear_fecha, normalizar_si_no, construir_nombre_directorio, imprimir_encabezado
+from lib.procesadores import crear_directorios_descarga
 from dotenv import load_dotenv
 import os
 import pandas as pd
 from datetime import date, datetime
 import numpy as np
 from openpyxl import load_workbook
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 load_dotenv()
-
-
-def _fmt_fecha(val):
-    """Formatea valores de fecha al formato DD/MM/YYYY."""
-    if pd.isna(val):
-        return ''
-    if isinstance(val, (pd.Timestamp, datetime, date)):
-        return val.strftime('%d/%m/%Y')
-    parsed = pd.to_datetime(val, errors='coerce')
-    if pd.isna(parsed):
-        return str(val)
-    return parsed.strftime('%d/%m/%Y')
 
 
 def procesar_descarga_mc(row, mrbot_user, mrbot_api_key, base_url, mis_comprobantes_endpoint, downloads_mc_path):
@@ -41,12 +33,12 @@ def procesar_descarga_mc(row, mrbot_user, mrbot_api_key, base_url, mis_comproban
     cuit_representante = str(row['CUIT_Representante'])
     clave_representante = row['Clave_representante']
     cuit_representado = str(row['CUIT_Representado'])
-    desde = _fmt_fecha(row['Desde_MC'])
-    hasta = _fmt_fecha(row['Hasta_MC'])
+    desde = formatear_fecha(row['Desde_MC'])
+    hasta = formatear_fecha(row['Hasta_MC'])
     denominacion_mc = row['Denominacion_MC']
-    descarga_MC = str(row['Descarga_MC']).lower().strip()
-    descarga_MC_emitidos = str(row['Descarga_MC_emitidos']).lower().strip()
-    descarga_MC_recibidos = str(row['Descarga_MC_recibidos']).lower().strip()
+    descarga_MC = normalizar_si_no(row['Descarga_MC'])
+    descarga_MC_emitidos = normalizar_si_no(row['Descarga_MC_emitidos'])
+    descarga_MC_recibidos = normalizar_si_no(row['Descarga_MC_recibidos'])
 
     if descarga_MC != 'si':
         print(f"Saltando descarga MC para CUIT {cuit_representado} - Descarga_MC: {descarga_MC}")
@@ -86,41 +78,37 @@ def procesar_descarga_mc(row, mrbot_user, mrbot_api_key, base_url, mis_comproban
         # Extraer URLs de MinIO
         urls = extraccion_urls_minio(response)
 
-        # Crear directorio del contribuyente
-        directorio_contribuyente = os.path.join(downloads_mc_path, f"{cuit_representado}_{denominacion_mc}")
-        directorio_extraido = os.path.join(directorio_contribuyente, "extraido")
-        os.makedirs(directorio_contribuyente, exist_ok=True)
-        os.makedirs(directorio_extraido, exist_ok=True)
+        # Crear directorios
+        directorios = crear_directorios_descarga(
+            downloads_mc_path, 
+            cuit_representado, 
+            denominacion_mc,
+            ['extraido']
+        )
 
-        # Descargar archivos
-        archivos_descargados = []
-        
+        # Preparar descargas concurrentes
+        descargas = []
         if descargar_emitidos and urls.get('emitidos'):
-            print(f"\nDescargando emitidos...")
-            archivo_emitidos = descargar_archivo(
-                urls['emitidos'],
-                None,
-                directorio_contribuyente
-            )
-            archivos_descargados.append(archivo_emitidos)
+            print(f"\nPreparando descarga de emitidos...")
+            descargas.append((urls['emitidos'], None, directorios['principal']))
         
         if descargar_recibidos and urls.get('recibidos'):
-            print(f"\nDescargando recibidos...")
-            archivo_recibidos = descargar_archivo(
-                urls['recibidos'],
-                None,
-                directorio_contribuyente
-            )
-            archivos_descargados.append(archivo_recibidos)
+            print(f"\nPreparando descarga de recibidos...")
+            descargas.append((urls['recibidos'], None, directorios['principal']))
 
-        # Extraer ZIPs
-        for archivo_zip in archivos_descargados:
-            if archivo_zip and archivo_zip.endswith('.zip'):
-                print(f"\nExtrayendo: {archivo_zip}")
-                try:
-                    extraer_zip(archivo_zip, directorio_extraido)
-                except Exception as e:
-                    print(f"Error al extraer {archivo_zip}: {e}")
+        # Descargar archivos de forma concurrente
+        if descargas:
+            print(f"\nDescargando {len(descargas)} archivo(s)...")
+            archivos_descargados = descargar_archivos_concurrente(descargas)
+            
+            # Extraer ZIPs
+            for archivo_zip in archivos_descargados:
+                if archivo_zip and archivo_zip.endswith('.zip'):
+                    print(f"\nExtrayendo: {archivo_zip}")
+                    try:
+                        extraer_zip(archivo_zip, directorios['extraido'])
+                    except Exception as e:
+                        print(f"Error al extraer {archivo_zip}: {e}")
 
         print(f"\n✓ Proceso MC completado para {denominacion_mc}")
 
@@ -143,10 +131,10 @@ def procesar_descarga_rcel(row, mrbot_user, mrbot_api_key, base_url, rcel_endpoi
     cuit_representante = str(row['CUIT_Representante'])
     clave_representante = row['Clave_representante']
     cuit_representado = str(row['CUIT_Representado'])
-    desde = _fmt_fecha(row['Desde_RCEL'])
-    hasta = _fmt_fecha(row['Hasta_RCEL'])
+    desde = formatear_fecha(row['Desde_RCEL'])
+    hasta = formatear_fecha(row['Hasta_RCEL'])
     denominacion_rcel = row['Denominacion_RCEL']
-    descarga_RCEL = str(row['Descarga_RCEL']).lower().strip()
+    descarga_RCEL = normalizar_si_no(row['Descarga_RCEL'])
 
     if descarga_RCEL != 'si':
         print(f"Saltando descarga RCEL para CUIT {cuit_representado} - Descarga_RCEL: {descarga_RCEL}")
@@ -180,32 +168,160 @@ def procesar_descarga_rcel(row, mrbot_user, mrbot_api_key, base_url, rcel_endpoi
             return
 
         # Crear directorio del contribuyente
-        directorio_contribuyente = os.path.join(downloads_rcel_path, f"{cuit_representado}_{denominacion_rcel}")
-        os.makedirs(directorio_contribuyente, exist_ok=True)
+        directorios = crear_directorios_descarga(
+            downloads_rcel_path, 
+            cuit_representado, 
+            denominacion_rcel
+        )
 
-        # Descargar archivos
-        print(f"\nDescargando {len(facturas)} facturas...")
+        # Preparar descargas concurrentes con metadata
+        print(f"\nPreparando descarga de {len(facturas)} facturas...")
+        descargas = []
+        facturas_metadata = {}
+        
         for factura in facturas:
             url_pdf = factura.get("URL_MINIO")
             if url_pdf:
-                try:
-                    ruta_descargada = descargar_archivo(
-                        url_pdf,
-                        None,
-                        directorio_contribuyente
-                    )
-                    # Guardar metadata JSON
-                    guardar_json(factura, ruta_descargada)
-                except Exception as e:
-                    print(f"Error descargando factura {factura.get('NUMERO_FACTURA', 'N/A')}: {e}")
+                descargas.append((url_pdf, None, directorios['principal']))
+                facturas_metadata[url_pdf] = factura
             else:
                 print(f"Factura sin URL_MINIO: {factura.get('NUMERO_FACTURA', 'N/A')}")
+        
+        # Descargar archivos de forma concurrente
+        if descargas:
+            print(f"\nDescargando {len(descargas)} archivo(s)...")
+            try:
+                rutas_descargadas = descargar_archivos_concurrente(descargas)
+                
+                # Guardar metadata JSON para cada archivo descargado
+                for ruta in rutas_descargadas:
+                    # Buscar la factura correspondiente
+                    for url, metadata in facturas_metadata.items():
+                        if url in ruta or os.path.basename(ruta) in url:
+                            guardar_json(metadata, ruta)
+                            break
+            except Exception as e:
+                print(f"Error descargando facturas: {e}")
 
         print(f"\n✓ Proceso RCEL completado para {denominacion_rcel}")
 
     except Exception as e:
         print(f"\n✗ Error procesando RCEL {denominacion_rcel} (CUIT: {cuit_representado}): {e}")
         
+
+def leer_archivos_csv_batch(archivos_mc):
+    """
+    Lee múltiples archivos CSV en batch de forma eficiente.
+    
+    Args:
+        archivos_mc: Lista de rutas de archivos CSV
+        
+    Returns:
+        pd.DataFrame: DataFrame consolidado con todos los datos
+    """
+    dataframes = []
+    
+    for f in archivos_mc:
+        if not os.path.isfile(f):
+            continue
+            
+        try:
+            data = pd.read_csv(f, sep=';', decimal=',', encoding='utf-8-sig')
+            
+            if len(data) == 0:
+                continue
+            
+            # Crear la columna 'Archivo' con el ultimo elemento de 'f' separado por "/"
+            data['Archivo'] = f.split("/")[-1]
+            
+            # Extraer información del nombre del archivo
+            partes_archivo = data["Archivo"].str.split("-")
+            data['Fin CUIT'] = partes_archivo.str[4].str.strip().astype(np.int64)
+            data['CUIT Cliente'] = partes_archivo.str[4].str.strip().astype(np.int64)
+            data['Cliente'] = partes_archivo.str[5].str.strip().str.replace('.csv','', regex=True)
+            
+            # Detectar si es MCE (emitidos) o MCR (recibidos) por las columnas
+            es_emitido = 'Denominación Receptor' in data.columns
+            es_recibido = 'Denominación Emisor' in data.columns
+            
+            # Unificar las columnas según el tipo
+            if es_emitido:
+                data['Nro. Doc. Receptor/Emisor'] = data['Nro. Doc. Receptor']
+                data['Denominación Receptor/Emisor'] = data['Denominación Receptor']
+            elif es_recibido:
+                data['Nro. Doc. Receptor/Emisor'] = data['Nro. Doc. Emisor']
+                data['Denominación Receptor/Emisor'] = data['Denominación Emisor']
+            
+            # Seleccionar solo las columnas necesarias
+            columnas_necesarias = [
+                'Fecha de Emisión', 'Tipo de Comprobante', 'Punto de Venta', 
+                'Número Desde', 'Número Hasta', 'Cód. Autorización',
+                'Tipo Cambio', 'Moneda', 
+                'Imp. Neto Gravado Total', 'Imp. Neto No Gravado', 
+                'Imp. Op. Exentas', 'Otros Tributos', 'Total IVA', 'Imp. Total',
+                'Nro. Doc. Receptor/Emisor', 'Denominación Receptor/Emisor',
+                'Archivo', 'CUIT Cliente', 'Fin CUIT', 'Cliente'
+            ]
+            data = data[columnas_necesarias]
+            dataframes.append(data)
+            
+        except Exception as e:
+            print(f"Error leyendo {f}: {e}")
+            continue
+    
+    # Concatenar todos los DataFrames de una vez (más eficiente que concatenación incremental)
+    if dataframes:
+        return pd.concat(dataframes, ignore_index=True)
+    else:
+        return pd.DataFrame()
+
+
+def leer_archivos_json_batch(archivos_json):
+    """
+    Lee múltiples archivos JSON en batch de forma eficiente.
+    
+    Args:
+        archivos_json: Lista de rutas de archivos JSON
+        
+    Returns:
+        pd.DataFrame: DataFrame consolidado con todos los datos
+    """
+    registros = []
+    
+    for factura in archivos_json:
+        if not os.path.isfile(factura):
+            continue
+            
+        try:
+            with open(factura, 'r', encoding='utf-8-sig') as f:
+                data_dict = json.load(f)
+            
+            # Crear la columna 'Archivo PDF'
+            data_dict['Archivo PDF'] = factura.split("/")[-1]
+            
+            # Extraer información del nombre del archivo
+            partes = data_dict["Archivo PDF"].split("-")
+            if len(partes) >= 1:
+                data_dict['CUIT Cliente'] = int(partes[0].strip())
+                data_dict['Fin CUIT'] = int(partes[0].strip())
+            
+            # Extraer Cliente del directorio padre
+            directorio_padre = factura.split("/")[-2]
+            cliente = directorio_padre.split("_", 1)[1] if "_" in directorio_padre else directorio_padre
+            data_dict['Cliente'] = cliente
+            
+            registros.append(data_dict)
+            
+        except Exception as e:
+            print(f"Error leyendo {factura}: {e}")
+            continue
+    
+    # Crear DataFrame de una vez con todos los registros
+    if registros:
+        return pd.DataFrame(registros)
+    else:
+        return pd.DataFrame()
+
 
 def control(
     archivos_mc: str ,
@@ -217,9 +333,6 @@ def control(
 
 
     '''
-    # Mostrar mensaje de inicio
-    #showinfo("Control de datos", "Se iniciará el control de los datos de los archivos de 'Mis Comprobantes' con las escalas de categorías de AFIP y los PDF de las facturas")
-
     # Leer Excel con las tablas de las escalas
     categorias = pd.read_excel('Categorias.xlsx')
 
@@ -230,102 +343,27 @@ def control(
     fecha_final = pd.read_excel('Categorias.xlsx', sheet_name='Rango de Fechas', header=None, skiprows=1, usecols=[1]).iloc[0,0]
     fecha_final = pd.to_datetime(fecha_final , format='%d/%m/%Y')
 
-    # Crear un DataFrame vacio para guardar los datos consolidados
-    consolidado = pd.DataFrame()
-    Info_Facturas_PDF = pd.DataFrame()
-
-    # Leer cada uno de los archivos de 'Mis Comprobantes' y concat en el DataFrame Consolidado
-    # Consolidar archivos y renombrar columnas
-    # consolidadar columnas
-    for f in archivos_mc:
-        #Si el existe el archivo, leerlo
-        if os.path.isfile(f):  
-            data = pd.read_csv(f, sep=';', decimal=',', encoding='utf-8-sig' )
-            # si el datsaframe esta vacio, no hacer nada
-            if len(data) > 0:
-                # Crear la columna 'Archivo' con el ultimo elemento de 'f' separado por "/"
-                data['Archivo'] = f.split("/")[-1]
-                
-                # Extraer información del nombre del archivo
-                # Formato: NumArchivo - Tipo - FechaDesde - FechaHasta - CUIT - Denominacion.csv
-                partes_archivo = data["Archivo"].str.split("-")
-                data['Fin CUIT'] = partes_archivo.str[4].str.strip().astype(np.int64)  # CUIT del contribuyente
-                data['CUIT Cliente'] = partes_archivo.str[4].str.strip().astype(np.int64)  # Mismo CUIT
-                data['Cliente'] = partes_archivo.str[5].str.strip().str.replace('.csv','', regex=True)
-                
-                # Detectar si es MCE (emitidos) o MCR (recibidos) por las columnas
-                es_emitido = 'Denominación Receptor' in data.columns
-                es_recibido = 'Denominación Emisor' in data.columns
-                
-                # Unificar las columnas según el tipo
-                if es_emitido:
-                    # Para emitidos: Receptor es el cliente
-                    data['Nro. Doc. Receptor/Emisor'] = data['Nro. Doc. Receptor']
-                    data['Denominación Receptor/Emisor'] = data['Denominación Receptor']
-                elif es_recibido:
-                    # Para recibidos: Emisor es el proveedor
-                    data['Nro. Doc. Receptor/Emisor'] = data['Nro. Doc. Emisor']
-                    data['Denominación Receptor/Emisor'] = data['Denominación Emisor']
-                
-                # Seleccionar solo las columnas necesarias para el consolidado
-                columnas_necesarias = [
-                    'Fecha de Emisión', 'Tipo de Comprobante', 'Punto de Venta', 
-                    'Número Desde', 'Número Hasta', 'Cód. Autorización',
-                    'Tipo Cambio', 'Moneda', 
-                    'Imp. Neto Gravado Total', 'Imp. Neto No Gravado', 
-                    'Imp. Op. Exentas', 'Otros Tributos', 'Total IVA', 'Imp. Total',
-                    'Nro. Doc. Receptor/Emisor', 'Denominación Receptor/Emisor',
-                    'Archivo', 'CUIT Cliente', 'Fin CUIT', 'Cliente'
-                ]
-                data = data[columnas_necesarias]
-                consolidado = pd.concat([consolidado , data], ignore_index=True)
-            
+    # Leer archivos CSV en batch (optimizado)
+    print("Leyendo archivos de Mis Comprobantes...")
+    consolidado = leer_archivos_csv_batch(archivos_mc)
+    
+    # Leer archivos JSON en batch (optimizado)
+    print("Leyendo archivos JSON de RCEL...")
+    Info_Facturas_PDF = leer_archivos_json_batch(archivos_PDF_JSON)
+    
+    if consolidado.empty:
+        print("No se encontraron datos en los archivos CSV")
+        return
+    
     # Renombrar columnas
     consolidado.columns = [ 'Fecha' , 'Tipo' , 'Punto de Venta' , 'Número Desde' , 'Número Hasta' , 'Cód. Autorización' , 'Tipo Cambio' , 'Moneda' , 'Imp. Neto Gravado' , 'Imp. Neto No Gravado' , 'Imp. Op. Exentas' , 'Otros Tributos' , 'IVA' , 'Imp. Total' , 'Nro. Doc. Receptor/Emisor' , 'Denominación Receptor/Emisor' , 'Archivo' , 'CUIT Cliente' , 'Fin CUIT' , 'Cliente']
 
     #Eliminar las columas 'Imp. Neto Gravado' , 'Imp. Neto No Gravado' , 'Imp. Op. Exentas' , 'IVA'
     consolidado.drop(['Imp. Neto Gravado' , 'Imp. Neto No Gravado' , 'Imp. Op. Exentas' , 'IVA'], axis=1, inplace=True)
 
-    #Cambiar de signo si es una Nota de Crédito (Tipo es numérico, no string)
-    # Nota: El tipo 11 es factura C, tipo 13 es nota de crédito C, etc.
-    # consolidado.loc[consolidado["Tipo"].str.contains("Nota de Crédito"), ['Imp. Total']] *= -1
-
     #Crear columna de 'MC' con los valores 'archivo' que van desde el caracter 5 al 8 en la Consolidado
     consolidado['MC'] = consolidado['Archivo'].str.split("-").str[1].str.strip()
-
-    # Leer archivos JSON de RCEL
-    for factura in archivos_PDF_JSON:
-        #Si el existe el archivo, leerlo
-        if os.path.isfile(factura):
-            import json
-            try:
-                with open(factura, 'r', encoding='utf-8-sig') as f:
-                    data_dict = json.load(f)
-                    
-                # Convertir a DataFrame (una sola fila)
-                data_pdf = pd.DataFrame([data_dict])
-                
-                # si el datsaframe esta vacio, no hacer nada
-                if len(data_pdf) > 0:
-                    # Crear la columna 'Archivo PDF' con el ultimo elemento de 'factura' separado por "/"
-                    data_pdf['Archivo PDF'] = factura.split("/")[-1]
-                    
-                    # Extraer información del nombre del archivo
-                    # Formato: CUIT-COD-PtoVenta-NumFactura.json
-                    partes = data_pdf["Archivo PDF"].str.split("-")
-                    data_pdf['CUIT Cliente'] = partes.str[0].str.strip().astype(np.int64)
-                    data_pdf['Fin CUIT'] = partes.str[0].str.strip().astype(np.int64)
-                    
-                    # Extraer Cliente del directorio padre
-                    directorio_padre = factura.split("/")[-2]  # Ej: "20147130202_BUSTOS JOSE MARTIN"
-                    cliente = directorio_padre.split("_", 1)[1] if "_" in directorio_padre else directorio_padre
-                    data_pdf['Cliente'] = cliente
-                    
-                    Info_Facturas_PDF = pd.concat([Info_Facturas_PDF , data_pdf], ignore_index=True)
-            except Exception as e:
-                print(f"Error leyendo {factura}: {e}")
-                continue
-
+    
     # Construir AUX en consolidado para cruzar con los JSON de RCEL
     # Formato del JSON: CUIT_Emisor-COD(3)-PtoVenta(5)-Numero(8)
     # En MC: Fin CUIT es el CUIT del emisor (contribuyente)
@@ -336,12 +374,18 @@ def control(
         consolidado['Número Desde'].astype(int).astype(str).str.zfill(8)
     )
 
-    # Merge con la tabla Info_Facturas_PDF 
-    consolidado = pd.merge(consolidado , 
-                           Info_Facturas_PDF[['AUX' , 'Desde' , 'Hasta' , 'Archivo PDF']] , 
-                           how='left' , 
-                           left_on='AUX' , 
-                           right_on='AUX')
+    # Merge con la tabla Info_Facturas_PDF (solo si hay datos de RCEL)
+    if not Info_Facturas_PDF.empty:
+        consolidado = pd.merge(consolidado , 
+                               Info_Facturas_PDF[['AUX' , 'Desde' , 'Hasta' , 'Archivo PDF']] , 
+                               how='left' , 
+                               left_on='AUX' , 
+                               right_on='AUX')
+    else:
+        # Crear columnas vacías si no hay datos de RCEL
+        consolidado['Desde'] = pd.NaT
+        consolidado['Hasta'] = pd.NaT
+        consolidado['Archivo PDF'] = None
 
     # Crear la columna 'Cruzado' con valores 'Si' o 'No' dependiendo si se cruzó o no la información
     consolidado['Cruzado'] = ''
