@@ -2,7 +2,7 @@
 
 Sistema automatizado para el control y recategorización de monotributistas mediante la descarga y análisis de comprobantes desde AFIP utilizando la API de MrBot.
 
-## 📋 Tabla de Contenidos
+## Tabla de Contenidos
 
 - [Descripción](#descripción)
 - [Características](#características)
@@ -15,18 +15,21 @@ Sistema automatizado para el control y recategorización de monotributistas medi
 - [Uso](#uso)
   - [Interfaz Gráfica (GUI)](#interfaz-gráfica-gui)
   - [Línea de Comandos](#línea-de-comandos)
-- [Archivo de Planilla](#archivo-de-planilla)
 - [Opciones y Parámetros](#opciones-y-parámetros)
 - [Estructura de Archivos](#estructura-de-archivos)
 - [Salida del Programa](#salida-del-programa)
+- [Testing](#testing)
+- [Solución de Problemas](#solución-de-problemas)
 - [Contribuir](#contribuir)
+- [Autor](#autor)
 - [Licencia](#licencia)
+- [Donaciones](#donaciones)
 
-## 📝 Descripción
+## Descripción
 
 Este proyecto permite automatizar el proceso de control de categorías de monotributistas comparando los ingresos declarados con las escalas vigentes de AFIP. El sistema descarga comprobantes desde "Mis Comprobantes" y RCEL (Registro de Comprobantes en Línea) utilizando la API de MrBot, procesa la información y genera un reporte completo en Excel.
 
-## ✨ Características
+## Características
 
 - **Descarga automática** de comprobantes desde Mis Comprobantes (MC) y RCEL
 - **Procesamiento concurrente** para optimizar tiempos de descarga
@@ -37,7 +40,7 @@ Este proyecto permite automatizar el proceso de control de categorías de monotr
 - **Modo consola** para automatización y scripts
 - **Validación de categorías** según escalas de AFIP
 
-## 📂 Estructura del Proyecto
+## Estructura del Proyecto
 
 ```
 control-monotributistas/
@@ -70,7 +73,7 @@ control-monotributistas/
 └── README.md                     # Este archivo
 ```
 
-## 🔧 Requisitos Previos
+## Requisitos Previos
 
 - **Python** 3.8 o superior
 - **Cuenta en MrBot** ([api-bots.mrbot.com.ar](https://api-bots.mrbot.com.ar/))
@@ -78,7 +81,7 @@ control-monotributistas/
 - **Claves fiscales** de los contribuyentes a procesar
 - **Microsoft Excel** o LibreOffice Calc (para visualizar reportes)
 
-## 📥 Instalación
+## Instalación
 
 ### Windows
 
@@ -146,7 +149,7 @@ control-monotributistas/
    pip install -r requirements.txt
    ```
 
-## ⚙️ Configuración
+## Configuración
 
 ### 1. Configurar Variables de Entorno
 
@@ -213,7 +216,7 @@ Completar el archivo `planilla-control-monotributistas.xlsx` con los datos de lo
 
 Ver `planilla-control-monotributistas-ejemplo.xlsx` para referencia.
 
-## 🚀 Uso
+## Uso
 
 ### Interfaz Gráfica (GUI)
 
@@ -253,7 +256,7 @@ El script ejecutará las siguientes tareas automáticamente:
 4. Procesar todos los archivos descargados
 5. Generar el reporte `Reporte Recategorizaciones de Monotributistas.xlsx`
 
-## 📊 Opciones y Parámetros
+## Opciones y Parámetros
 
 ### Variables de Entorno
 
@@ -277,7 +280,7 @@ El script ejecutará las siguientes tareas automáticamente:
 
 **Nota:** Las fechas deben estar en formato `dd/mm/yyyy`
 
-## 📁 Estructura de Archivos
+## Estructura de Archivos
 
 ### Archivos de Entrada
 
@@ -307,7 +310,7 @@ descargas_rcel/
     └── [CUIT]-[COD]-[PtoVenta]-[Numero].json
 ```
 
-## 📄 Salida del Programa
+## Salida del Programa
 
 El reporte generado contiene:
 
@@ -326,7 +329,7 @@ El reporte generado contiene:
 - Indicador de cruce con RCEL
 - Referencias a archivos PDF (cuando aplica)
 
-## 🧪 Testing
+## Testing
 
 Ejecutar tests de rendimiento:
 
@@ -348,7 +351,7 @@ pytest test/
 python3 -m pytest test/
 ```
 
-## 🐛 Solución de Problemas
+## Solución de Problemas
 
 ### Error: "No se encontró el módulo X"
 ```bash
@@ -368,7 +371,7 @@ Verificar que el archivo `.env` existe y contiene todas las variables requeridas
 - Confirmar que el CUIT tiene representación fiscal activa
 - Revisar que las fechas estén en el formato correcto
 
-## 🤝 Contribuir
+## Contribuir
 
 Las contribuciones son bienvenidas. Para cambios importantes:
 
@@ -378,18 +381,17 @@ Las contribuciones son bienvenidas. Para cambios importantes:
 4. Push a la rama (`git push origin feature/AmazingFeature`)
 5. Abrir un Pull Request
 
-## 👨‍💻 Autor
+## Autor
 
 **Agustín Bustos Piasentini**
 - MrBot: [www.mrbot.com.ar](https://www.mrbot.com.ar)
 - Cafecito: [cafecito.app/abustos](https://cafecito.app/abustos)
 
-## 📝 Licencia
+## Licencia
 
 Este proyecto es de código abierto y está disponible bajo la licencia que el autor determine.
 
-## ☕ Donaciones
-
+## Donaciones
 Si este proyecto te resulta útil, puedes invitarme un café en [Cafecito](https://cafecito.app/abustos).
 
 ---
