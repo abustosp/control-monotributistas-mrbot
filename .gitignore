@@ -1,4 +1,5 @@
 venv
+.venv
 .env
 *pycache*
 *.zip
@@ -7,4 +8,7 @@ venv
 *.json
 *.csv
 *.xlsx
+temp-pyinstaller
+ejecutable
+__pycache__
 

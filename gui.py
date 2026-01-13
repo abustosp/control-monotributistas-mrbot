@@ -8,10 +8,17 @@ import sys
 import pandas as pd
 import glob
 import threading
+from pathlib import Path
 from dotenv import load_dotenv
 from control import procesar_descarga_mc, procesar_descarga_rcel, control
 
 load_dotenv()
+
+
+def asset_path(*relative_parts):
+    """Devuelve la ruta absoluta a un recurso, funciona en dev y en ejecutable PyInstaller."""
+    base = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+    return str(base.joinpath(*relative_parts))
 
 class MonotributistasGUI(tk.Tk):
     def __init__(self):
@@ -21,6 +28,10 @@ class MonotributistasGUI(tk.Tk):
         self.geometry("650x780")
         self.resizable(False, False)
         self.configure(bg='#1e1e1e')
+        try:
+            self.iconbitmap(default=asset_path("lib", "ABP.ico"))
+        except Exception as e:
+            print(f"Error configurando icono: {e}")
         
         # Variable para guardar el archivo seleccionado
         self.archivo_seleccionado = None
@@ -36,7 +47,7 @@ class MonotributistasGUI(tk.Tk):
         
         # Logo MrBot (izquierda) - Proporción original: 342x74
         try:
-            mrbot_img = Image.open("lib/MrBot.png")
+            mrbot_img = Image.open(asset_path("lib", "MrBot.png"))
             # Mantener proporción original (4.62:1)
             mrbot_height = 60
             mrbot_width = int(mrbot_height * 342 / 74)
@@ -67,7 +78,7 @@ class MonotributistasGUI(tk.Tk):
         
         # Logo ABP (derecha) - Proporción original: 189x189 (1:1)
         try:
-            abp_img = Image.open("lib/ABP blanco en sin fondo.png")
+            abp_img = Image.open(asset_path("lib", "ABP blanco en sin fondo.png"))
             # Mantener proporción cuadrada original
             abp_size = 70
             abp_img = abp_img.resize((abp_size, abp_size), Image.Resampling.LANCZOS)
