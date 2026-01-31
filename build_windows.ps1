@@ -52,6 +52,8 @@ $pyinstallerArgs = @(
     "--distpath", $distPath,
     "--workpath", $workPath,
     "--specpath", $workPath,
+    "--hidden-import", "PIL._tkinter_finder",
+    "--hidden-import", "PIL._imagingtk",
     "--noconfirm",
     "--clean"
 )

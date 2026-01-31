@@ -37,6 +37,8 @@ fi
   --distpath "$DIST_DIR" \
   --workpath "$WORK_DIR" \
   --specpath "$WORK_DIR" \
+  --hidden-import PIL._tkinter_finder \
+  --hidden-import PIL._imagingtk \
   --noconfirm \
   --clean
 
