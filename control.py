@@ -17,6 +17,26 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 load_dotenv()
 
+notas_de_credito = [
+    3,
+    8,
+    13,
+    21,
+    38,
+    43,
+    44,
+    48,
+    53,
+    90,
+    110,
+    112,
+    113,
+    114,
+    119,
+    203,
+    208,
+    213,
+]
 
 def procesar_descarga_mc(row, mrbot_user, mrbot_api_key, base_url, mis_comprobantes_endpoint, downloads_mc_path):
     """
@@ -357,6 +377,14 @@ def control(
     
     # Renombrar columnas
     consolidado.columns = [ 'Fecha' , 'Tipo' , 'Punto de Venta' , 'Número Desde' , 'Número Hasta' , 'Cód. Autorización' , 'Tipo Cambio' , 'Moneda' , 'Imp. Neto Gravado' , 'Imp. Neto No Gravado' , 'Imp. Op. Exentas' , 'Otros Tributos' , 'IVA' , 'Imp. Total' , 'Nro. Doc. Receptor/Emisor' , 'Denominación Receptor/Emisor' , 'Archivo' , 'CUIT Cliente' , 'Fin CUIT' , 'Cliente']
+
+    # multiplicar las columnas numéricas por la columna 'Tipo Cambio'
+    columnas_numericas = ['Imp. Neto Gravado' , 'Imp. Neto No Gravado' , 'Imp. Op. Exentas' , 'Otros Tributos' , 'IVA' , 'Imp. Total']
+    for col in columnas_numericas:
+        consolidado[col] = consolidado[col] * consolidado['Tipo Cambio']
+        
+    # multiplicar las columnas numericas por -1 si el 'Tipo' es una nota de crédito
+    consolidado.loc[consolidado['Tipo'].isin(notas_de_credito), columnas_numericas] *= -1
 
     #Eliminar las columas 'Imp. Neto Gravado' , 'Imp. Neto No Gravado' , 'Imp. Op. Exentas' , 'IVA'
     consolidado.drop(['Imp. Neto Gravado' , 'Imp. Neto No Gravado' , 'Imp. Op. Exentas' , 'IVA'], axis=1, inplace=True)
