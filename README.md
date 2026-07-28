@@ -1,5 +1,7 @@
 # Control de Monotributistas
 
+> ⚠️ **Este repositorio fue archivado.** El proyecto fue migrado al cliente de escritorio como un submódulo de **Control de Monotributo**, por lo que este repositorio es de solo lectura y no recibirá más actualizaciones.
+
 Sistema automatizado para el control y recategorización de monotributistas mediante la descarga y análisis de comprobantes desde AFIP utilizando la API de MrBot.
 
 ## Tabla de Contenidos
